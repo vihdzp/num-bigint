@@ -38,6 +38,7 @@ harness = false
 name = "shootout-pidigits"
 
 [dependencies]
+xmath-traits = { path = "../xmath-traits" }
 
 [dependencies.num-integer]
 version = "0.1.42"
