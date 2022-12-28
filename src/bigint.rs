@@ -37,11 +37,12 @@ mod arbitrary;
 mod serde;
 
 /// A Sign is a `BigInt`'s composing element.
+#[repr(i8)]
 #[derive(PartialEq, PartialOrd, Eq, Ord, Copy, Clone, Debug, Hash)]
 pub enum Sign {
-    Minus,
-    NoSign,
-    Plus,
+    Minus = -1,
+    NoSign = 0,
+    Plus = 1,
 }
 
 impl Neg for Sign {
@@ -332,12 +333,19 @@ impl_unsigned_abs!(i64, u64);
 impl_unsigned_abs!(i128, u128);
 impl_unsigned_abs!(isize, usize);
 
+impl BigInt {
+    #[inline]
+    pub fn neg_mut(&mut self) {
+        self.sign = -self.sign;
+    }
+}
+
 impl Neg for BigInt {
     type Output = BigInt;
 
     #[inline]
     fn neg(mut self) -> BigInt {
-        self.sign = -self.sign;
+        self.neg_mut();
         self
     }
 }

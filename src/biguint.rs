@@ -35,6 +35,7 @@ pub(crate) use self::convert::to_str_radix_reversed;
 pub use self::iter::{U32Digits, U64Digits};
 
 /// A big unsigned integer type.
+#[repr(transparent)]
 pub struct BigUint {
     data: Vec<BigDigit>,
 }
