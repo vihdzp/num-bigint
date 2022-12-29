@@ -4,10 +4,12 @@ use super::Sign::{Minus, NoSign, Plus};
 use crate::big_digit::{self, BigDigit, DoubleBigDigit};
 use crate::biguint::IntDigits;
 use crate::std_alloc::Vec;
+use crate::Sign;
 
 use core::cmp::Ordering::{Equal, Greater, Less};
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 use num_traits::{ToPrimitive, Zero};
+use xmath_matrix::{trim, Poly};
 
 // Negation in two's complement.
 // acc must be initialized as 1 for least-significant digit.
@@ -140,6 +142,13 @@ impl<'a> BitAnd<&'a BigInt> for BigInt {
     }
 }
 
+pub fn trim_int<T: xmath_traits::Zero>(digits: &mut Vec<T>, sign: &mut Sign) {
+    trim(digits);
+    if digits.is_empty() {
+        *sign = Sign::NoSign;
+    }
+}
+
 forward_val_assign!(impl BitAndAssign for BigInt, bitand_assign);
 
 impl<'a> BitAndAssign<&'a BigInt> for BigInt {
@@ -153,19 +162,19 @@ impl<'a> BitAndAssign<&'a BigInt> for BigInt {
                     self.sign = NoSign;
                 }
             }
-            (Plus, Minus) => {
-                bitand_pos_neg(self.digits_mut(), other.digits());
-                self.normalize();
-            }
-            (Minus, Plus) => {
-                bitand_neg_pos(self.digits_mut(), other.digits());
+            (Plus, Minus) => unsafe {
+                bitand_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Plus) => unsafe {
+                bitand_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Plus;
-                self.normalize();
-            }
-            (Minus, Minus) => {
-                bitand_neg_neg(self.digits_mut(), other.digits());
-                self.normalize();
-            }
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Minus) => unsafe {
+                bitand_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
         }
     }
 }
@@ -288,19 +297,19 @@ impl<'a> BitOrAssign<&'a BigInt> for BigInt {
             (_, NoSign) => {}
             (NoSign, _) => self.clone_from(other),
             (Plus, Plus) => self.data |= &other.data,
-            (Plus, Minus) => {
-                bitor_pos_neg(self.digits_mut(), other.digits());
+            (Plus, Minus) => unsafe {
+                bitor_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Minus;
-                self.normalize();
-            }
-            (Minus, Plus) => {
-                bitor_neg_pos(self.digits_mut(), other.digits());
-                self.normalize();
-            }
-            (Minus, Minus) => {
-                bitor_neg_neg(self.digits_mut(), other.digits());
-                self.normalize();
-            }
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Plus) => unsafe {
+                bitor_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Minus) => unsafe {
+                bitor_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
         }
     }
 }
@@ -431,20 +440,20 @@ impl<'a> BitXorAssign<&'a BigInt> for BigInt {
                     self.sign = NoSign;
                 }
             }
-            (Plus, Minus) => {
-                bitxor_pos_neg(self.digits_mut(), other.digits());
+            (Plus, Minus) => unsafe {
+                bitxor_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Minus;
-                self.normalize();
-            }
-            (Minus, Plus) => {
-                bitxor_neg_pos(self.digits_mut(), other.digits());
-                self.normalize();
-            }
-            (Minus, Minus) => {
-                bitxor_neg_neg(self.digits_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Plus) => unsafe {
+                bitxor_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
+            (Minus, Minus) => unsafe {
+                bitxor_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Plus;
-                self.normalize();
-            }
+                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+            },
         }
     }
 }
@@ -476,7 +485,7 @@ pub(super) fn set_negative_bit(x: &mut BigInt, bit: u64, value: bool) {
             // stop traversing the digits when there are no more carries.
             let bit_index = (bit / bits_per_digit).to_usize().unwrap();
             let bit_mask = (1 as BigDigit) << (bit % bits_per_digit);
-            let mut digit_iter = data.digits_mut().iter_mut().skip(bit_index);
+            let mut digit_iter = data.digits_mut().as_slice_mut().iter_mut().skip(bit_index);
             let mut carry_in = 1;
             let mut carry_out = 1;
 
@@ -517,7 +526,7 @@ pub(super) fn set_negative_bit(x: &mut BigInt, bit: u64, value: bool) {
                 digits[index_lo] ^= bit_mask_lo & bit_mask_hi;
             } else {
                 digits[index_lo] = bit_mask_lo;
-                for digit in &mut digits[index_lo + 1..index_hi] {
+                for digit in &mut digits.as_slice_mut()[index_lo + 1..index_hi] {
                     *digit = big_digit::MAX;
                 }
                 digits[index_hi] ^= bit_mask_hi;

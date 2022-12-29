@@ -11,7 +11,9 @@ use core::str;
 use core::{u32, u64, u8};
 
 use num_integer::{Integer, Roots};
-use num_traits::{Num, One, Pow, ToPrimitive, Unsigned, Zero};
+use num_traits::{Num, Pow, ToPrimitive, Unsigned};
+use xmath_matrix::Poly;
+use xmath_traits::{One, Zero};
 
 mod addition;
 mod division;
@@ -37,7 +39,7 @@ pub use self::iter::{U32Digits, U64Digits};
 /// A big unsigned integer type.
 #[repr(transparent)]
 pub struct BigUint {
-    data: Vec<BigDigit>,
+    pub data: Poly<BigDigit>,
 }
 
 // Note: derived `Clone` doesn't specialize `clone_from`,
@@ -59,7 +61,6 @@ impl Clone for BigUint {
 impl hash::Hash for BigUint {
     #[inline]
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        debug_assert!(self.data.last() != Some(&0));
         self.data.hash(state);
     }
 }
@@ -67,8 +68,6 @@ impl hash::Hash for BigUint {
 impl PartialEq for BigUint {
     #[inline]
     fn eq(&self, other: &BigUint) -> bool {
-        debug_assert!(self.data.last() != Some(&0));
-        debug_assert!(other.data.last() != Some(&0));
         self.data == other.data
     }
 }
@@ -144,10 +143,10 @@ impl fmt::Octal for BigUint {
     }
 }
 
-impl Zero for BigUint {
+impl num_traits::Zero for BigUint {
     #[inline]
     fn zero() -> BigUint {
-        BigUint { data: Vec::new() }
+        BigUint { data: Poly::zero() }
     }
 
     #[inline]
@@ -161,21 +160,20 @@ impl Zero for BigUint {
     }
 }
 
-impl One for BigUint {
+impl num_traits::One for BigUint {
     #[inline]
     fn one() -> BigUint {
-        BigUint { data: vec![1] }
+        BigUint { data: Poly::one() }
     }
 
     #[inline]
     fn set_one(&mut self) {
-        self.data.clear();
-        self.data.push(1);
+        self.data.set_one();
     }
 
     #[inline]
     fn is_one(&self) -> bool {
-        self.data[..] == [1]
+        self.data.is_one()
     }
 }
 
@@ -511,9 +509,10 @@ pub trait ToBigUint {
 /// Creates and initializes a `BigUint`.
 ///
 /// The digits are in little-endian base matching `BigDigit`.
+// TODO: RENAME AS NEW.
 #[inline]
-pub(crate) fn biguint_from_vec(digits: Vec<BigDigit>) -> BigUint {
-    BigUint { data: digits }.normalized()
+pub(crate) fn biguint_from_vec(digits: Poly<BigDigit>) -> BigUint {
+    BigUint { data: digits }
 }
 
 impl BigUint {
@@ -843,26 +842,6 @@ impl BigUint {
         self.data.len() as u64 * u64::from(big_digit::BITS) - zeros
     }
 
-    /// Strips off trailing zero bigdigits - comparisons require the last element in the vector to
-    /// be nonzero.
-    #[inline]
-    fn normalize(&mut self) {
-        if let Some(&0) = self.data.last() {
-            let len = self.data.iter().rposition(|&d| d != 0).map_or(0, |i| i + 1);
-            self.data.truncate(len);
-        }
-        if self.data.len() < self.data.capacity() / 4 {
-            self.data.shrink_to_fit();
-        }
-    }
-
-    /// Returns a normalized `BigUint`.
-    #[inline]
-    fn normalized(mut self) -> BigUint {
-        self.normalize();
-        self
-    }
-
     /// Returns `self ^ exponent`.
     pub fn pow(&self, exponent: u32) -> Self {
         Pow::pow(self, exponent)
@@ -944,11 +923,14 @@ impl BigUint {
             .unwrap_or(core::usize::MAX);
         let bit_mask = (1 as BigDigit) << (bit % bits_per_digit);
         if value {
-            if digit_index >= self.data.len() {
-                let new_len = digit_index.saturating_add(1);
-                self.data.resize(new_len, 0);
+            // This only runs for a 1 bit, so the leading bit remains nonzero.
+            unsafe {
+                if digit_index >= self.data.len() {
+                    let new_len = digit_index.saturating_add(1);
+                    self.data.as_vec_mut().resize(new_len, 0);
+                }
+                self.data.as_slice_mut()[digit_index] |= bit_mask;
             }
-            self.data[digit_index] |= bit_mask;
         } else if digit_index < self.data.len() {
             self.data[digit_index] &= !bit_mask;
             // the top bit may have been cleared, so normalize
@@ -959,7 +941,7 @@ impl BigUint {
 
 pub(crate) trait IntDigits {
     fn digits(&self) -> &[BigDigit];
-    fn digits_mut(&mut self) -> &mut Vec<BigDigit>;
+    fn digits_mut(&mut self) -> &mut Poly<BigDigit>;
     fn normalize(&mut self);
     fn capacity(&self) -> usize;
     fn len(&self) -> usize;
@@ -968,10 +950,10 @@ pub(crate) trait IntDigits {
 impl IntDigits for BigUint {
     #[inline]
     fn digits(&self) -> &[BigDigit] {
-        &self.data
+        self.data.as_slice()
     }
     #[inline]
-    fn digits_mut(&mut self) -> &mut Vec<BigDigit> {
+    fn digits_mut(&mut self) -> &mut Poly<BigDigit> {
         &mut self.data
     }
     #[inline]

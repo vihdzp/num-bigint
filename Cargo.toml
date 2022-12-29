@@ -38,6 +38,7 @@ harness = false
 name = "shootout-pidigits"
 
 [dependencies]
+xmath-matrix = { path = "../xmath-matrix" }
 xmath-traits = { path = "../xmath-traits" }
 
 [dependencies.num-integer]

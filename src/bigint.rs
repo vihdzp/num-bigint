@@ -13,6 +13,7 @@ use core::{i64, u64};
 
 use num_integer::{Integer, Roots};
 use num_traits::{Num, One, Pow, Signed, Zero};
+use xmath_matrix::Poly;
 
 use self::Sign::{Minus, NoSign, Plus};
 
@@ -546,7 +547,7 @@ impl IntDigits for BigInt {
         self.data.digits()
     }
     #[inline]
-    fn digits_mut(&mut self) -> &mut Vec<BigDigit> {
+    fn digits_mut(&mut self) -> &mut Poly<BigDigit> {
         self.data.digits_mut()
     }
     #[inline]
