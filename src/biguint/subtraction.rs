@@ -118,8 +118,8 @@ impl<'a> Sub<&'a BigUint> for BigUint {
 }
 impl<'a> SubAssign<&'a BigUint> for BigUint {
     fn sub_assign(&mut self, other: &'a BigUint) {
-        sub2(&mut self.data[..], &other.data[..]);
-        self.normalize();
+        self.data
+            .and_trim(|vec| sub2(&mut vec[..], &other.data[..]));
     }
 }
 
@@ -127,17 +127,20 @@ impl<'a> Sub<BigUint> for &'a BigUint {
     type Output = BigUint;
 
     fn sub(self, mut other: BigUint) -> BigUint {
-        let other_len = other.data.len();
-        if other_len < self.data.len() {
-            let lo_borrow = __sub2rev(&self.data[..other_len], &mut other.data);
-            other.data.extend_from_slice(&self.data[other_len..]);
-            if lo_borrow != 0 {
-                sub2(&mut other.data[other_len..], &[1])
+        other.data.and_trim(|vec| {
+            let other_len = vec.len();
+            if other_len < self.data.len() {
+                let lo_borrow = __sub2rev(&self.data[..other_len], vec);
+                vec.extend_from_slice(&self.data[other_len..]);
+                if lo_borrow != 0 {
+                    sub2(&mut vec[other_len..], &[1])
+                }
+            } else {
+                sub2rev(&self.data[..], &mut vec[..]);
             }
-        } else {
-            sub2rev(&self.data[..], &mut other.data[..]);
-        }
-        other.normalized()
+        });
+
+        other
     }
 }
 
@@ -159,8 +162,8 @@ impl Sub<u32> for BigUint {
 
 impl SubAssign<u32> for BigUint {
     fn sub_assign(&mut self, other: u32) {
-        sub2(&mut self.data[..], &[other as BigDigit]);
-        self.normalize();
+        self.data
+            .and_trim(|vec| sub2(&mut vec[..], &[other as BigDigit]));
     }
 }
 
@@ -170,23 +173,29 @@ impl Sub<BigUint> for u32 {
     #[cfg(not(u64_digit))]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        if other.data.len() == 0 {
-            other.data.push(self);
-        } else {
-            sub2rev(&[self], &mut other.data[..]);
-        }
-        other.normalized()
+        other.data.and_trim(|vec| {
+            if vec.len() == 0 {
+                vec.push(self);
+            } else {
+                sub2rev(&[self], &mut vec[..]);
+            }
+        });
+
+        other
     }
 
     #[cfg(u64_digit)]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        if other.data.is_empty() {
-            other.data.push(self as BigDigit);
-        } else {
-            sub2rev(&[self as BigDigit], &mut other.data[..]);
-        }
-        other.normalized()
+        other.data.and_trim(|vec| {
+            if vec.is_empty() {
+                vec.push(self as BigDigit);
+            } else {
+                sub2rev(&[self as BigDigit], &mut vec[..]);
+            }
+        });
+
+        other
     }
 }
 
@@ -205,15 +214,14 @@ impl SubAssign<u64> for BigUint {
     #[inline]
     fn sub_assign(&mut self, other: u64) {
         let (hi, lo) = big_digit::from_doublebigdigit(other);
-        sub2(&mut self.data[..], &[lo, hi]);
-        self.normalize();
+        self.data.and_trim(|vec| sub2(&mut vec[..], &[lo, hi]));
     }
 
     #[cfg(u64_digit)]
     #[inline]
     fn sub_assign(&mut self, other: u64) {
-        sub2(&mut self.data[..], &[other as BigDigit]);
-        self.normalize();
+        self.data
+            .and_trim(|vec| sub2(&mut vec[..], &[other as BigDigit]));
     }
 }
 
@@ -223,24 +231,30 @@ impl Sub<BigUint> for u64 {
     #[cfg(not(u64_digit))]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        while other.data.len() < 2 {
-            other.data.push(0);
-        }
+        other.data.and_trim(|vec| {
+            while vec.len() < 2 {
+                vec.push(0);
+            }
 
-        let (hi, lo) = big_digit::from_doublebigdigit(self);
-        sub2rev(&[lo, hi], &mut other.data[..]);
-        other.normalized()
+            let (hi, lo) = big_digit::from_doublebigdigit(self);
+            sub2rev(&[lo, hi], &mut vec[..]);
+        });
+
+        other
     }
 
     #[cfg(u64_digit)]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        if other.data.is_empty() {
-            other.data.push(self);
-        } else {
-            sub2rev(&[self], &mut other.data[..]);
-        }
-        other.normalized()
+        other.data.and_trim(|vec| {
+            if vec.is_empty() {
+                vec.push(self);
+            } else {
+                sub2rev(&[self], &mut vec[..]);
+            }
+        });
+
+        other
     }
 }
 
@@ -258,17 +272,19 @@ impl SubAssign<u128> for BigUint {
     #[cfg(not(u64_digit))]
     #[inline]
     fn sub_assign(&mut self, other: u128) {
-        let (a, b, c, d) = u32_from_u128(other);
-        sub2(&mut self.data[..], &[d, c, b, a]);
-        self.normalize();
+        self.data.and_trim(|vec| {
+            let (a, b, c, d) = u32_from_u128(other);
+            sub2(&mut vec[..], &[d, c, b, a]);
+        });
     }
 
     #[cfg(u64_digit)]
     #[inline]
     fn sub_assign(&mut self, other: u128) {
-        let (hi, lo) = big_digit::from_doublebigdigit(other);
-        sub2(&mut self.data[..], &[lo, hi]);
-        self.normalize();
+        self.data.and_trim(|vec| {
+            let (hi, lo) = big_digit::from_doublebigdigit(other);
+            sub2(&mut vec[..], &[lo, hi]);
+        });
     }
 }
 
@@ -278,25 +294,31 @@ impl Sub<BigUint> for u128 {
     #[cfg(not(u64_digit))]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        while other.data.len() < 4 {
-            other.data.push(0);
-        }
+        other.data.and_trim(|vec| {
+            while vec.len() < 4 {
+                vec.push(0);
+            }
 
-        let (a, b, c, d) = u32_from_u128(self);
-        sub2rev(&[d, c, b, a], &mut other.data[..]);
-        other.normalized()
+            let (a, b, c, d) = u32_from_u128(self);
+            sub2rev(&[d, c, b, a], &mut vec[..]);
+        });
+
+        other
     }
 
     #[cfg(u64_digit)]
     #[inline]
     fn sub(self, mut other: BigUint) -> BigUint {
-        while other.data.len() < 2 {
-            other.data.push(0);
-        }
+        other.data.and_trim(|vec| {
+            while vec.len() < 2 {
+                vec.push(0);
+            }
 
-        let (hi, lo) = big_digit::from_doublebigdigit(self);
-        sub2rev(&[lo, hi], &mut other.data[..]);
-        other.normalized()
+            let (hi, lo) = big_digit::from_doublebigdigit(self);
+            sub2rev(&[lo, hi], &mut vec[..]);
+        });
+
+        other
     }
 }
 

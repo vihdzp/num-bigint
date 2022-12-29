@@ -164,16 +164,16 @@ impl<'a> BitAndAssign<&'a BigInt> for BigInt {
             }
             (Plus, Minus) => unsafe {
                 bitand_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Plus) => unsafe {
                 bitand_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Plus;
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Minus) => unsafe {
                 bitand_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
         }
     }
@@ -300,15 +300,15 @@ impl<'a> BitOrAssign<&'a BigInt> for BigInt {
             (Plus, Minus) => unsafe {
                 bitor_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Minus;
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Plus) => unsafe {
                 bitor_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Minus) => unsafe {
                 bitor_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
         }
     }
@@ -443,16 +443,16 @@ impl<'a> BitXorAssign<&'a BigInt> for BigInt {
             (Plus, Minus) => unsafe {
                 bitxor_pos_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Minus;
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Plus) => unsafe {
                 bitxor_neg_pos(self.digits_mut().as_vec_mut(), other.digits());
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
             (Minus, Minus) => unsafe {
                 bitxor_neg_neg(self.digits_mut().as_vec_mut(), other.digits());
                 self.sign = Plus;
-                trim_int(self.digits_mut().as_vec_mut(), &mut self.sign);
+                trim_int(self.data.data.as_vec_mut(), &mut self.sign);
             },
         }
     }
@@ -485,28 +485,33 @@ pub(super) fn set_negative_bit(x: &mut BigInt, bit: u64, value: bool) {
             // stop traversing the digits when there are no more carries.
             let bit_index = (bit / bits_per_digit).to_usize().unwrap();
             let bit_mask = (1 as BigDigit) << (bit % bits_per_digit);
-            let mut digit_iter = data.digits_mut().as_slice_mut().iter_mut().skip(bit_index);
-            let mut carry_in = 1;
-            let mut carry_out = 1;
 
-            let digit = digit_iter.next().unwrap();
-            let twos_in = negate_carry(*digit, &mut carry_in);
-            let twos_out = twos_in & !bit_mask;
-            *digit = negate_carry(twos_out, &mut carry_out);
+            unsafe {
+                data.data.and_trim_unchecked(|digits| {
+                    let mut digit_iter = digits.iter_mut().skip(bit_index);
+                    let mut carry_in = 1;
+                    let mut carry_out = 1;
 
-            for digit in digit_iter {
-                if carry_in == 0 && carry_out == 0 {
-                    // Exit the loop since no more digits can change
-                    break;
-                }
-                let twos = negate_carry(*digit, &mut carry_in);
-                *digit = negate_carry(twos, &mut carry_out);
-            }
+                    let digit = digit_iter.next().unwrap();
+                    let twos_in = negate_carry(*digit, &mut carry_in);
+                    let twos_out = twos_in & !bit_mask;
+                    *digit = negate_carry(twos_out, &mut carry_out);
 
-            if carry_out != 0 {
-                // All digits have been traversed and there is a carry
-                debug_assert_eq!(carry_in, 0);
-                data.digits_mut().push(1);
+                    for digit in digit_iter {
+                        if carry_in == 0 && carry_out == 0 {
+                            // Exit the loop since no more digits can change
+                            break;
+                        }
+                        let twos = negate_carry(*digit, &mut carry_in);
+                        *digit = negate_carry(twos, &mut carry_out);
+                    }
+
+                    if carry_out != 0 {
+                        // All digits have been traversed and there is a carry
+                        debug_assert_eq!(carry_in, 0);
+                        digits.push(1);
+                    }
+                });
             }
         } else if bit < trailing_zeros && value {
             // Flip each bit from position 'bit' to 'trailing_zeros', both inclusive
@@ -520,16 +525,19 @@ pub(super) fn set_negative_bit(x: &mut BigInt, bit: u64, value: bool) {
             let bit_mask_lo = big_digit::MAX << (bit % bits_per_digit);
             let bit_mask_hi =
                 big_digit::MAX >> (bits_per_digit - 1 - (trailing_zeros % bits_per_digit));
-            let digits = data.digits_mut();
 
-            if index_lo == index_hi {
-                digits[index_lo] ^= bit_mask_lo & bit_mask_hi;
-            } else {
-                digits[index_lo] = bit_mask_lo;
-                for digit in &mut digits.as_slice_mut()[index_lo + 1..index_hi] {
-                    *digit = big_digit::MAX;
-                }
-                digits[index_hi] ^= bit_mask_hi;
+            unsafe {
+                data.data.and_trim_unchecked(|digits| {
+                    if index_lo == index_hi {
+                        digits[index_lo] ^= bit_mask_lo & bit_mask_hi;
+                    } else {
+                        digits[index_lo] = bit_mask_lo;
+                        for digit in &mut digits[index_lo + 1..index_hi] {
+                            *digit = big_digit::MAX;
+                        }
+                        digits[index_hi] ^= bit_mask_hi;
+                    }
+                });
             }
         } else {
             // We end up here in two cases:

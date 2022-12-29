@@ -35,11 +35,12 @@ impl<'a> BitAnd<&'a BigUint> for BigUint {
 impl<'a> BitAndAssign<&'a BigUint> for BigUint {
     #[inline]
     fn bitand_assign(&mut self, other: &BigUint) {
-        for (ai, &bi) in self.data.iter_mut().zip(other.data.iter()) {
-            *ai &= bi;
-        }
-        self.data.truncate(other.data.len());
-        self.normalize();
+        self.data.and_trim(|vec| {
+            for (ai, &bi) in vec.iter_mut().zip(other.data.iter()) {
+                *ai &= bi;
+            }
+            vec.truncate(other.data.len());
+        });
     }
 }
 
@@ -57,13 +58,15 @@ impl<'a> BitOr<&'a BigUint> for BigUint {
 impl<'a> BitOrAssign<&'a BigUint> for BigUint {
     #[inline]
     fn bitor_assign(&mut self, other: &BigUint) {
-        for (ai, &bi) in self.data.iter_mut().zip(other.data.iter()) {
-            *ai |= bi;
-        }
-        if other.data.len() > self.data.len() {
-            let extra = &other.data[self.data.len()..];
-            self.data.extend(extra.iter().cloned());
-        }
+        self.data.and_trim(|vec| {
+            for (ai, &bi) in vec.iter_mut().zip(other.data.iter()) {
+                *ai |= bi;
+            }
+            if other.data.len() > vec.len() {
+                let extra = &other.data[vec.len()..];
+                vec.extend(extra.iter().cloned());
+            }
+        });
     }
 }
 
@@ -81,13 +84,14 @@ impl<'a> BitXor<&'a BigUint> for BigUint {
 impl<'a> BitXorAssign<&'a BigUint> for BigUint {
     #[inline]
     fn bitxor_assign(&mut self, other: &BigUint) {
-        for (ai, &bi) in self.data.iter_mut().zip(other.data.iter()) {
-            *ai ^= bi;
-        }
-        if other.data.len() > self.data.len() {
-            let extra = &other.data[self.data.len()..];
-            self.data.extend(extra.iter().cloned());
-        }
-        self.normalize();
+        self.data.and_trim(|vec| {
+            for (ai, &bi) in vec.iter_mut().zip(other.data.iter()) {
+                *ai ^= bi;
+            }
+            if other.data.len() > vec.len() {
+                let extra = &other.data[vec.len()..];
+                vec.extend(extra.iter().cloned());
+            }
+        });
     }
 }

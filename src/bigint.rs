@@ -551,13 +551,6 @@ impl IntDigits for BigInt {
         self.data.digits_mut()
     }
     #[inline]
-    fn normalize(&mut self) {
-        self.data.normalize();
-        if self.data.is_zero() {
-            self.sign = NoSign;
-        }
-    }
-    #[inline]
     fn capacity(&self) -> usize {
         self.data.capacity()
     }
@@ -1101,8 +1094,11 @@ impl BigInt {
                 }
             }
         }
+
         // The top bit may have been cleared, so normalize
-        self.normalize();
+        if self.data.is_zero() {
+            self.sign = Sign::NoSign;
+        }
     }
 }
 

@@ -12,6 +12,7 @@ use core::cmp::Ordering;
 use core::iter::Product;
 use core::ops::{Mul, MulAssign};
 use num_traits::{CheckedMul, FromPrimitive, One, Zero};
+use xmath_matrix::trim;
 
 #[inline]
 pub(super) fn mac_with_carry(
@@ -60,7 +61,7 @@ fn mac_digit(acc: &mut [BigDigit], b: &[BigDigit], c: BigDigit) {
 }
 
 fn bigint_from_slice(slice: &[BigDigit]) -> BigInt {
-    BigInt::from(biguint_from_vec(slice.to_vec()))
+    BigInt::from(biguint_from_vec(slice.to_vec().into()))
 }
 
 /// Three argument multiply accumulate:
@@ -175,27 +176,27 @@ fn mac3(mut acc: &mut [BigDigit], mut b: &[BigDigit], mut c: &[BigDigit]) {
         // We reuse the same BigUint for all the intermediate multiplies and have to size p
         // appropriately here: x1.len() >= x0.len and y1.len() >= y0.len():
         let len = x1.len() + y1.len() + 1;
-        let mut p = BigUint { data: vec![0; len] };
+        let mut p = vec![0; len];
 
         // p2 = x1 * y1
-        mac3(&mut p.data, x1, y1);
+        mac3(&mut p, x1, y1);
 
         // Not required, but the adds go faster if we drop any unneeded 0s from the end:
-        p.normalize();
+        trim(&mut p);
 
-        add2(&mut acc[b..], &p.data);
-        add2(&mut acc[b * 2..], &p.data);
+        add2(&mut acc[b..], &p);
+        add2(&mut acc[b * 2..], &p);
 
         // Zero out p before the next multiply:
-        p.data.truncate(0);
-        p.data.resize(len, 0);
+        p.truncate(0);
+        p.resize(len, 0);
 
         // p0 = x0 * y0
-        mac3(&mut p.data, x0, y0);
-        p.normalize();
+        mac3(&mut p, x0, y0);
+        trim(&mut p);
 
-        add2(acc, &p.data);
-        add2(&mut acc[b..], &p.data);
+        add2(acc, &p);
+        add2(&mut acc[b..], &p);
 
         // p1 = (x1 - x0) * (y1 - y0)
         // We do this one last, since it may be negative and acc can't ever be negative:
@@ -204,16 +205,16 @@ fn mac3(mut acc: &mut [BigDigit], mut b: &[BigDigit], mut c: &[BigDigit]) {
 
         match j0_sign * j1_sign {
             Plus => {
-                p.data.truncate(0);
-                p.data.resize(len, 0);
+                p.truncate(0);
+                p.resize(len, 0);
 
-                mac3(&mut p.data, &j0.data, &j1.data);
-                p.normalize();
+                mac3(&mut p, &j0.data[..], &j1.data[..]);
+                trim(&mut p);
 
-                sub2(&mut acc[b..], &p.data);
+                sub2(&mut acc[b..], &p);
             }
             Minus => {
-                mac3(&mut acc[b..], &j0.data, &j1.data);
+                mac3(&mut acc[b..], &j0.data[..], &j1.data[..]);
             }
             NoSign => (),
         }
@@ -351,10 +352,10 @@ fn mac3(mut acc: &mut [BigDigit], mut b: &[BigDigit], mut c: &[BigDigit]) {
 
 fn mul3(x: &[BigDigit], y: &[BigDigit]) -> BigUint {
     let len = x.len() + y.len() + 1;
-    let mut prod = BigUint { data: vec![0; len] };
+    let mut prod = vec![0; len];
 
-    mac3(&mut prod.data, x, y);
-    prod.normalized()
+    mac3(&mut prod, x, y);
+    biguint_from_vec(prod.into())
 }
 
 fn scalar_mul(a: &mut BigUint, b: BigDigit) {
@@ -366,12 +367,15 @@ fn scalar_mul(a: &mut BigUint, b: BigDigit) {
                 *a <<= b.trailing_zeros();
             } else {
                 let mut carry = 0;
-                for a in a.data.iter_mut() {
-                    *a = mul_with_carry(*a, b, &mut carry);
-                }
-                if carry != 0 {
-                    a.data.push(carry as BigDigit);
-                }
+
+                a.data.and_trim(|vec| {
+                    for a in vec.iter_mut() {
+                        *a = mul_with_carry(*a, b, &mut carry);
+                    }
+                    if carry != 0 {
+                        vec.push(carry as BigDigit);
+                    }
+                });
             }
         }
     }
@@ -390,12 +394,12 @@ fn sub_sign(mut a: &[BigDigit], mut b: &[BigDigit]) -> (Sign, BigUint) {
         Ordering::Greater => {
             let mut a = a.to_vec();
             sub2(&mut a, b);
-            (Plus, biguint_from_vec(a))
+            (Plus, biguint_from_vec(a.into()))
         }
         Ordering::Less => {
             let mut b = b.to_vec();
             sub2(&mut b, a);
-            (Minus, biguint_from_vec(b))
+            (Minus, biguint_from_vec(b.into()))
         }
         Ordering::Equal => (NoSign, Zero::zero()),
     }
@@ -408,7 +412,7 @@ macro_rules! impl_mul {
 
             #[inline]
             fn mul(self, other: $Other) -> BigUint {
-                match (&*self.data, &*other.data) {
+                match (self.data.as_slice(), other.data.as_slice()) {
                     // multiply by zero
                     (&[], _) | (_, &[]) => BigUint::zero(),
                     // multiply by a scalar
@@ -433,7 +437,7 @@ macro_rules! impl_mul_assign {
         impl<$($a),*> MulAssign<$Other> for BigUint {
             #[inline]
             fn mul_assign(&mut self, other: $Other) {
-                match (&*self.data, &*other.data) {
+                match (self.data.as_slice(), other.data.as_slice()) {
                     // multiply by zero
                     (&[], _) => {},
                     (_, &[]) => self.set_zero(),
@@ -534,7 +538,7 @@ impl MulAssign<u128> for BigUint {
             scalar_mul(self, other);
         } else {
             let (hi, lo) = big_digit::from_doublebigdigit(other);
-            *self = mul3(&self.data, &[lo, hi]);
+            *self = mul3(&self.data[..], &[lo, hi]);
         }
     }
 }
@@ -563,6 +567,6 @@ fn test_sub_sign() {
     let a_i = BigInt::from(a.clone());
     let b_i = BigInt::from(b.clone());
 
-    assert_eq!(sub_sign_i(&a.data, &b.data), &a_i - &b_i);
-    assert_eq!(sub_sign_i(&b.data, &a.data), &b_i - &a_i);
+    assert_eq!(sub_sign_i(&a.data[..], &b.data[..]), &a_i - &b_i);
+    assert_eq!(sub_sign_i(&b.data[..], &a.data[..]), &b_i - &a_i);
 }

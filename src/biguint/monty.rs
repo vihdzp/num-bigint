@@ -4,7 +4,7 @@ use core::ops::Shl;
 use num_traits::{One, Zero};
 
 use crate::big_digit::{self, BigDigit, DoubleBigDigit, SignedDoubleBigDigit};
-use crate::biguint::BigUint;
+use crate::biguint::{biguint_from_vec, BigUint};
 
 struct MontyReducer {
     n0inv: BigDigit,
@@ -42,13 +42,13 @@ impl MontyReducer {
 /// x and y are required to satisfy 0 <= z < 2**(n*_W) and then the result
 /// z is guaranteed to satisfy 0 <= z < 2**(n*_W), but it may not be < m.
 #[allow(clippy::many_single_char_names)]
-fn montgomery(x: &BigUint, y: &BigUint, m: &BigUint, k: BigDigit, n: usize) -> BigUint {
+fn montgomery(x: &[BigDigit], y: &[BigDigit], m: &BigUint, k: BigDigit, n: usize) -> BigUint {
     // This code assumes x, y, m are all the same length, n.
     // (required by addMulVVW and the for loop).
     // It also assumes that x, y are already reduced mod m,
     // or else the result will not be properly reduced.
     assert!(
-        x.data.len() == n && y.data.len() == n && m.data.len() == n,
+        x.len() == n && y.len() == n && m.data.len() == n,
         "{:?} {:?} {:?} {}",
         x,
         y,
@@ -56,17 +56,16 @@ fn montgomery(x: &BigUint, y: &BigUint, m: &BigUint, k: BigDigit, n: usize) -> B
         n
     );
 
-    let mut z = BigUint::zero();
-    z.data.resize(n * 2, 0);
+    let mut z = vec![0; n * 2];
 
     let mut c: BigDigit = 0;
     for i in 0..n {
-        let c2 = add_mul_vvw(&mut z.data[i..n + i], &x.data, y.data[i]);
-        let t = z.data[i].wrapping_mul(k);
-        let c3 = add_mul_vvw(&mut z.data[i..n + i], &m.data, t);
+        let c2 = add_mul_vvw(&mut z[i..n + i], &x[..], y[i]);
+        let t = z[i].wrapping_mul(k);
+        let c3 = add_mul_vvw(&mut z[i..n + i], &m.data[..], t);
         let cx = c.wrapping_add(c2);
         let cy = cx.wrapping_add(c3);
-        z.data[n + i] = cy;
+        z[n + i] = cy;
         if cx < c2 || cy < c3 {
             c = 1;
         } else {
@@ -75,16 +74,17 @@ fn montgomery(x: &BigUint, y: &BigUint, m: &BigUint, k: BigDigit, n: usize) -> B
     }
 
     if c == 0 {
-        z.data = z.data[n..].to_vec();
+        z = z[n..].to_vec();
     } else {
         {
-            let (mut first, second) = z.data.split_at_mut(n);
-            sub_vv(&mut first, &second, &m.data);
+            let (mut first, second) = z.split_at_mut(n);
+            sub_vv(&mut first, &second, &m.data[..]);
         }
-        z.data = z.data[..n].to_vec();
+        z = z[..n].to_vec();
     }
 
-    z
+    // This might have the first digit nonzero? idk
+    BigUint { data: z.into() }
 }
 
 #[inline(always)]
@@ -146,19 +146,25 @@ pub(super) fn monty_modpow(x: &BigUint, y: &BigUint, m: &BigUint) -> BigUint {
         x %= m;
         // Note: now len(x) <= numWords, not guaranteed ==.
     }
-    if x.data.len() < num_words {
-        x.data.resize(num_words, 0);
+
+    let mut x = x.data.as_vec().clone();
+
+    if x.len() < num_words {
+        x.resize(num_words, 0);
     }
 
     // rr = 2**(2*_W*len(m)) mod m
     let mut rr = BigUint::one();
     rr = (rr.shl(2 * num_words as u64 * u64::from(big_digit::BITS))) % m;
-    if rr.data.len() < num_words {
-        rr.data.resize(num_words, 0);
+
+    let mut rr = rr.data.as_vec().clone();
+
+    if rr.len() < num_words {
+        rr.resize(num_words, 0);
     }
     // one = 1, with equal length to that of m
-    let mut one = BigUint::one();
-    one.data.resize(num_words, 0);
+    let mut one = vec![1];
+    one.resize(num_words, 0);
 
     let n = 4;
     // powers[i] contains x^i
@@ -166,15 +172,20 @@ pub(super) fn monty_modpow(x: &BigUint, y: &BigUint, m: &BigUint) -> BigUint {
     powers.push(montgomery(&one, &rr, m, mr.n0inv, num_words));
     powers.push(montgomery(&x, &rr, m, mr.n0inv, num_words));
     for i in 2..1 << n {
-        let r = montgomery(&powers[i - 1], &powers[1], m, mr.n0inv, num_words);
+        let r = montgomery(
+            &powers[i - 1].data[..],
+            &powers[1].data[..],
+            m,
+            mr.n0inv,
+            num_words,
+        );
         powers.push(r);
     }
 
     // initialize z = 1 (Montgomery 1)
-    let mut z = powers[0].clone();
-    z.data.resize(num_words, 0);
-    let mut zz = BigUint::zero();
-    zz.data.resize(num_words, 0);
+    let mut z = powers[0].data.as_vec().clone();
+    z.resize(num_words, 0);
+    let mut zz = vec![0; num_words];
 
     // same windowed exponent, but with Montgomery multiplications
     for i in (0..y.data.len()).rev() {
@@ -182,18 +193,20 @@ pub(super) fn monty_modpow(x: &BigUint, y: &BigUint, m: &BigUint) -> BigUint {
         let mut j = 0;
         while j < big_digit::BITS {
             if i != y.data.len() - 1 || j != 0 {
-                zz = montgomery(&z, &z, m, mr.n0inv, num_words);
-                z = montgomery(&zz, &zz, m, mr.n0inv, num_words);
-                zz = montgomery(&z, &z, m, mr.n0inv, num_words);
-                z = montgomery(&zz, &zz, m, mr.n0inv, num_words);
+                zz = montgomery(&z, &z, m, mr.n0inv, num_words).data.into();
+                z = montgomery(&zz, &zz, m, mr.n0inv, num_words).data.into();
+                zz = montgomery(&z, &z, m, mr.n0inv, num_words).data.into();
+                z = montgomery(&zz, &zz, m, mr.n0inv, num_words).data.into();
             }
             zz = montgomery(
                 &z,
-                &powers[(yi >> (big_digit::BITS - n)) as usize],
+                &powers[(yi >> (big_digit::BITS - n)) as usize].data[..],
                 m,
                 mr.n0inv,
                 num_words,
-            );
+            )
+            .data
+            .into();
             mem::swap(&mut z, &mut zz);
             yi <<= n;
             j += n;
@@ -201,9 +214,10 @@ pub(super) fn monty_modpow(x: &BigUint, y: &BigUint, m: &BigUint) -> BigUint {
     }
 
     // convert to regular number
-    zz = montgomery(&z, &one, m, mr.n0inv, num_words);
+    zz = montgomery(&z, &one, m, mr.n0inv, num_words).data.into();
 
-    zz.normalize();
+    let mut zz = biguint_from_vec(zz.into());
+
     // One last reduction, just in case.
     // See golang.org/issue/13907.
     if zz >= *m {
@@ -220,6 +234,5 @@ pub(super) fn monty_modpow(x: &BigUint, y: &BigUint, m: &BigUint) -> BigUint {
         }
     }
 
-    zz.normalize();
     zz
 }

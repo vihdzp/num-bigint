@@ -94,7 +94,7 @@ fn from_inexact_bitwise_digits_le(v: &[u8], bits: u8) -> BigUint {
         data.push(d as BigDigit);
     }
 
-    biguint_from_vec(data)
+    biguint_from_vec(data.into())
 }
 
 // Read little-endian radix digits
@@ -139,10 +139,10 @@ fn from_radix_digits_be(v: &[u8], radix: u32) -> BigUint {
         let n = chunk
             .iter()
             .fold(0, |acc, &d| acc * radix + BigDigit::from(d));
-        add2(&mut data, &[n]);
+        unsafe { add2(&mut data, &[n]) };
     }
 
-    biguint_from_vec(data)
+    biguint_from_vec(data.into())
 }
 
 pub(super) fn from_radix_be(buf: &[u8], radix: u32) -> Option<BigUint> {
@@ -474,29 +474,29 @@ impl FromPrimitive for BigUint {
 impl From<u64> for BigUint {
     #[inline]
     fn from(mut n: u64) -> Self {
-        let mut ret: BigUint = Zero::zero();
+        let mut ret = Vec::new();
 
         while n != 0 {
-            ret.data.push(n as BigDigit);
+            ret.push(n as BigDigit);
             // don't overflow if BITS is 64:
             n = (n >> 1) >> (big_digit::BITS - 1);
         }
 
-        ret
+        biguint_from_vec(ret.into())
     }
 }
 
 impl From<u128> for BigUint {
     #[inline]
     fn from(mut n: u128) -> Self {
-        let mut ret: BigUint = Zero::zero();
+        let mut ret = Vec::new();
 
         while n != 0 {
-            ret.data.push(n as BigDigit);
+            ret.push(n as BigDigit);
             n >>= big_digit::BITS;
         }
 
-        ret
+        biguint_from_vec(ret.into())
     }
 }
 

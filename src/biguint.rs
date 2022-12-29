@@ -557,8 +557,6 @@ impl BigUint {
 
         #[cfg(u64_digit)]
         self.data.extend(slice.chunks(2).map(u32_chunk_to_u64));
-
-        self.normalize();
     }
 
     /// Creates and initializes a `BigUint`.
@@ -932,9 +930,7 @@ impl BigUint {
                 self.data.as_slice_mut()[digit_index] |= bit_mask;
             }
         } else if digit_index < self.data.len() {
-            self.data[digit_index] &= !bit_mask;
-            // the top bit may have been cleared, so normalize
-            self.normalize();
+            self.data.and_trim(|vec| vec[digit_index] &= !bit_mask);
         }
     }
 }
@@ -942,7 +938,6 @@ impl BigUint {
 pub(crate) trait IntDigits {
     fn digits(&self) -> &[BigDigit];
     fn digits_mut(&mut self) -> &mut Poly<BigDigit>;
-    fn normalize(&mut self);
     fn capacity(&self) -> usize;
     fn len(&self) -> usize;
 }
@@ -955,10 +950,6 @@ impl IntDigits for BigUint {
     #[inline]
     fn digits_mut(&mut self) -> &mut Poly<BigDigit> {
         &mut self.data
-    }
-    #[inline]
-    fn normalize(&mut self) {
-        self.normalize();
     }
     #[inline]
     fn capacity(&self) -> usize {
@@ -1019,7 +1010,7 @@ fn test_from_slice() {
 fn test_from_slice() {
     fn check(slice: &[u32], data: &[BigDigit]) {
         assert_eq!(
-            BigUint::from_slice(slice).data,
+            &BigUint::from_slice(slice).data[..],
             data,
             "from {:?}, to {:?}",
             slice,

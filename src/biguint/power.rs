@@ -142,7 +142,7 @@ pub(super) fn modpow(x: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigU
         monty_modpow(x, exponent, modulus)
     } else {
         // Otherwise do basically the same as `num::pow`, but with a modulus.
-        plain_modpow(x, &exponent.data, modulus)
+        plain_modpow(x, &exponent.data[..], modulus)
     }
 }
 

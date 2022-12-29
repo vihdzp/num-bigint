@@ -97,16 +97,21 @@ impl<'a> Add<&'a BigUint> for BigUint {
 impl<'a> AddAssign<&'a BigUint> for BigUint {
     #[inline]
     fn add_assign(&mut self, other: &BigUint) {
-        let self_len = self.data.len();
-        let carry = if self_len < other.data.len() {
-            let lo_carry = __add2(&mut self.data[..], &other.data[..self_len]);
-            self.data.extend_from_slice(&other.data[self_len..]);
-            __add2(&mut self.data[self_len..], &[lo_carry])
-        } else {
-            __add2(&mut self.data[..], &other.data[..])
-        };
-        if carry != 0 {
-            self.data.push(carry);
+        // Safety: the trailing digit remains nonzero.
+        unsafe {
+            self.data.and_trim_unchecked(|vec| {
+                let self_len = vec.len();
+                let carry = if self_len < other.data.len() {
+                    let lo_carry = __add2(&mut vec[..], &other.data[..self_len]);
+                    vec.extend_from_slice(&other.data[self_len..]);
+                    __add2(&mut vec[self_len..], &[lo_carry])
+                } else {
+                    __add2(&mut vec[..], &other.data[..])
+                };
+                if carry != 0 {
+                    vec.push(carry);
+                }
+            });
         }
     }
 }
@@ -131,13 +136,18 @@ impl AddAssign<u32> for BigUint {
     #[inline]
     fn add_assign(&mut self, other: u32) {
         if other != 0 {
-            if self.data.is_empty() {
-                self.data.push(0);
-            }
+            // Safety: the leading digit remains nonzero.
+            unsafe {
+                self.data.and_trim_unchecked(|vec| {
+                    if vec.is_empty() {
+                        vec.push(0);
+                    }
 
-            let carry = __add2(&mut self.data, &[other as BigDigit]);
-            if carry != 0 {
-                self.data.push(carry);
+                    let carry = __add2(vec, &[other as BigDigit]);
+                    if carry != 0 {
+                        vec.push(carry);
+                    }
+                });
             }
         }
     }
@@ -161,13 +171,18 @@ impl AddAssign<u64> for BigUint {
         if hi == 0 {
             *self += lo;
         } else {
-            while self.data.len() < 2 {
-                self.data.push(0);
-            }
+            // Safety: the trailing digit remains nonzero.
+            unsafe {
+                self.data.and_trim_unchecked(|vec| {
+                    while vec.len() < 2 {
+                        vec.push(0);
+                    }
 
-            let carry = __add2(&mut self.data, &[lo, hi]);
-            if carry != 0 {
-                self.data.push(carry);
+                    let carry = __add2(vec, &[lo, hi]);
+                    if carry != 0 {
+                        vec.push(carry);
+                    }
+                });
             }
         }
     }
@@ -176,13 +191,18 @@ impl AddAssign<u64> for BigUint {
     #[inline]
     fn add_assign(&mut self, other: u64) {
         if other != 0 {
-            if self.data.is_empty() {
-                self.data.push(0);
-            }
+            // Safety: the leading digit remains nonzero.
+            unsafe {
+                self.data.and_trim_unchecked(|vec| {
+                    if vec.is_empty() {
+                        vec.push(0);
+                    }
 
-            let carry = __add2(&mut self.data, &[other as BigDigit]);
-            if carry != 0 {
-                self.data.push(carry);
+                    let carry = __add2(vec, &[other as BigDigit]);
+                    if carry != 0 {
+                        vec.push(carry);
+                    }
+                });
             }
         }
     }
@@ -206,21 +226,27 @@ impl AddAssign<u128> for BigUint {
             *self += other as u64
         } else {
             let (a, b, c, d) = u32_from_u128(other);
-            let carry = if a > 0 {
-                while self.data.len() < 4 {
-                    self.data.push(0);
-                }
-                __add2(&mut self.data, &[d, c, b, a])
-            } else {
-                debug_assert!(b > 0);
-                while self.data.len() < 3 {
-                    self.data.push(0);
-                }
-                __add2(&mut self.data, &[d, c, b])
-            };
 
-            if carry != 0 {
-                self.data.push(carry);
+            // Safety: the leading digit remains nonzero.
+            unsafe {
+                self.data.and_trim_unchecked(|vec| {
+                    let carry = if a > 0 {
+                        while vec.len() < 4 {
+                            vec.push(0);
+                        }
+                        __add2(vec, &[d, c, b, a])
+                    } else {
+                        debug_assert!(b > 0);
+                        while vec.len() < 3 {
+                            vec.push(0);
+                        }
+                        __add2(vec, &[d, c, b])
+                    };
+
+                    if carry != 0 {
+                        vec.push(carry);
+                    }
+                });
             }
         }
     }
@@ -232,13 +258,18 @@ impl AddAssign<u128> for BigUint {
         if hi == 0 {
             *self += lo;
         } else {
-            while self.data.len() < 2 {
-                self.data.push(0);
-            }
+            // Safety: the leading digit remains nonzero.
+            unsafe {
+                self.data.and_trim_unchecked(|vec| {
+                    while vec.len() < 2 {
+                        vec.push(0);
+                    }
 
-            let carry = __add2(&mut self.data, &[lo, hi]);
-            if carry != 0 {
-                self.data.push(carry);
+                    let carry = __add2(vec, &[lo, hi]);
+                    if carry != 0 {
+                        vec.push(carry);
+                    }
+                });
             }
         }
     }

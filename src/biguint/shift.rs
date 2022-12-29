@@ -23,7 +23,7 @@ fn biguint_shl<T: PrimInt>(n: Cow<'_, BigUint>, shift: T) -> BigUint {
 
 fn biguint_shl2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
     let mut data = match digits {
-        0 => n.into_owned().data,
+        0 => n.into_owned().data.into(),
         _ => {
             let len = digits.saturating_add(n.data.len() + 1);
             let mut data = Vec::with_capacity(len);
@@ -46,7 +46,7 @@ fn biguint_shl2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
         }
     }
 
-    biguint_from_vec(data)
+    biguint_from_vec(data.into())
 }
 
 #[inline]
@@ -72,8 +72,9 @@ fn biguint_shr2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
     let mut data = match n {
         Cow::Borrowed(n) => n.data[digits..].to_vec(),
         Cow::Owned(mut n) => {
-            n.data.drain(..digits);
-            n.data
+            let mut vec: Vec<_> = n.data.into();
+            vec.drain(..digits);
+            vec
         }
     };
 
@@ -87,7 +88,7 @@ fn biguint_shr2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
         }
     }
 
-    biguint_from_vec(data)
+    biguint_from_vec(data.into())
 }
 
 macro_rules! impl_shift {

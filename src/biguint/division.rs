@@ -47,21 +47,23 @@ pub(super) fn div_rem_digit(mut a: BigUint, b: BigDigit) -> (BigUint, BigDigit) 
 
     let mut rem = 0;
 
-    if b <= big_digit::HALF {
-        for d in a.data.iter_mut().rev() {
-            let (q, r) = div_half(rem, *d, b);
-            *d = q;
-            rem = r;
+    a.data.and_trim(|vec| {
+        if b <= big_digit::HALF {
+            for d in vec.iter_mut().rev() {
+                let (q, r) = div_half(rem, *d, b);
+                *d = q;
+                rem = r;
+            }
+        } else {
+            for d in vec.iter_mut().rev() {
+                let (q, r) = div_wide(rem, *d, b);
+                *d = q;
+                rem = r;
+            }
         }
-    } else {
-        for d in a.data.iter_mut().rev() {
-            let (q, r) = div_wide(rem, *d, b);
-            *d = q;
-            rem = r;
-        }
-    }
+    });
 
-    (a.normalized(), rem)
+    (a, rem)
 }
 
 #[inline]
@@ -125,7 +127,7 @@ fn div_rem(mut u: BigUint, mut d: BigUint) -> (BigUint, BigUint) {
     }
 
     if d.data.len() == 1 {
-        if d.data == [1] {
+        if d.is_one() {
             return (u, Zero::zero());
         }
         let (div, rem) = div_rem_digit(u, d.data[0]);
@@ -155,9 +157,9 @@ fn div_rem(mut u: BigUint, mut d: BigUint) -> (BigUint, BigUint) {
 
     if shift == 0 {
         // no need to clone d
-        div_rem_core(u, &d.data)
+        div_rem_core(u, d.data.as_slice())
     } else {
-        let (q, r) = div_rem_core(u << shift, &(d << shift).data);
+        let (q, r) = div_rem_core(u << shift, (d << shift).data.as_slice());
         // renormalize the remainder
         (q, r >> shift)
     }
@@ -172,7 +174,7 @@ pub(super) fn div_rem_ref(u: &BigUint, d: &BigUint) -> (BigUint, BigUint) {
     }
 
     if d.data.len() == 1 {
-        if d.data == [1] {
+        if d.data[0] == 1 {
             return (u.clone(), Zero::zero());
         }
 
@@ -197,9 +199,9 @@ pub(super) fn div_rem_ref(u: &BigUint, d: &BigUint) -> (BigUint, BigUint) {
 
     if shift == 0 {
         // no need to clone d
-        div_rem_core(u.clone(), &d.data)
+        div_rem_core(u.clone(), d.data.as_slice())
     } else {
-        let (q, r) = div_rem_core(u << shift, &(d << shift).data);
+        let (q, r) = div_rem_core(u << shift, (d << shift).data.as_slice());
         // renormalize the remainder
         (q, r >> shift)
     }
@@ -236,68 +238,67 @@ fn div_rem_core(mut a: BigUint, b: &[BigDigit]) -> (BigUint, BigUint) {
     let b1 = b[b.len() - 2];
 
     let q_len = a.data.len() - b.len() + 1;
-    let mut q = BigUint {
-        data: vec![0; q_len],
-    };
+    let mut q = vec![0; q_len];
 
-    for j in (0..q_len).rev() {
-        debug_assert!(a.data.len() == b.len() + j);
+    a.data.and_trim(|vec| {
+        for j in (0..q_len).rev() {
+            debug_assert!(vec.len() == b.len() + j);
 
-        let a1 = *a.data.last().unwrap();
-        let a2 = a.data[a.data.len() - 2];
+            let a1 = *vec.last().unwrap();
+            let a2 = vec[vec.len() - 2];
 
-        // The first q0 estimate is [a1,a0] / b0. It will never be too small, it may be too large
-        // by at most 2.
-        let (mut q0, mut r) = if a0 < b0 {
-            let (q0, r) = div_wide(a0, a1, b0);
-            (q0, r as DoubleBigDigit)
-        } else {
-            debug_assert!(a0 == b0);
-            // Avoid overflowing q0, we know the quotient fits in BigDigit.
-            // [a1,a0] = b0 * (1<<BITS - 1) + (a0 + a1)
-            (big_digit::MAX, a0 as DoubleBigDigit + a1 as DoubleBigDigit)
-        };
+            // The first q0 estimate is [a1,a0] / b0. It will never be too small, it may be too large
+            // by at most 2.
+            let (mut q0, mut r) = if a0 < b0 {
+                let (q0, r) = div_wide(a0, a1, b0);
+                (q0, r as DoubleBigDigit)
+            } else {
+                debug_assert!(a0 == b0);
+                // Avoid overflowing q0, we know the quotient fits in BigDigit.
+                // [a1,a0] = b0 * (1<<BITS - 1) + (a0 + a1)
+                (big_digit::MAX, a0 as DoubleBigDigit + a1 as DoubleBigDigit)
+            };
 
-        // r = [a1,a0] - q0 * b0
-        //
-        // Now we want to compute a more precise estimate [a2,a1,a0] / [b1,b0] which can only be
-        // less or equal to the current q0.
-        //
-        // q0 is too large if:
-        // [a2,a1,a0] < q0 * [b1,b0]
-        // (r << BITS) + a2 < q0 * b1
-        while r <= big_digit::MAX as DoubleBigDigit
-            && big_digit::to_doublebigdigit(r as BigDigit, a2)
-                < q0 as DoubleBigDigit * b1 as DoubleBigDigit
-        {
-            q0 -= 1;
-            r += b0 as DoubleBigDigit;
+            // r = [a1,a0] - q0 * b0
+            //
+            // Now we want to compute a more precise estimate [a2,a1,a0] / [b1,b0] which can only be
+            // less or equal to the current q0.
+            //
+            // q0 is too large if:
+            // [a2,a1,a0] < q0 * [b1,b0]
+            // (r << BITS) + a2 < q0 * b1
+            while r <= big_digit::MAX as DoubleBigDigit
+                && big_digit::to_doublebigdigit(r as BigDigit, a2)
+                    < q0 as DoubleBigDigit * b1 as DoubleBigDigit
+            {
+                q0 -= 1;
+                r += b0 as DoubleBigDigit;
+            }
+
+            // q0 is now either the correct quotient digit, or in rare cases 1 too large.
+            // Subtract (q0 << j) from a. This may overflow, in which case we will have to correct.
+
+            let mut borrow = sub_mul_digit_same_len(&mut vec[j..], b, q0);
+            if borrow > a0 {
+                // q0 is too large. We need to add back one multiple of b.
+                q0 -= 1;
+                borrow -= __add2(&mut vec[j..], b);
+            }
+            // The top digit of a, stored in a0, has now been zeroed.
+            debug_assert!(borrow == a0);
+
+            q[j] = q0;
+
+            // Pop off the next top digit of a.
+            a0 = vec.pop().unwrap();
         }
 
-        // q0 is now either the correct quotient digit, or in rare cases 1 too large.
-        // Subtract (q0 << j) from a. This may overflow, in which case we will have to correct.
+        vec.push(a0);
+    });
 
-        let mut borrow = sub_mul_digit_same_len(&mut a.data[j..], b, q0);
-        if borrow > a0 {
-            // q0 is too large. We need to add back one multiple of b.
-            q0 -= 1;
-            borrow -= __add2(&mut a.data[j..], b);
-        }
-        // The top digit of a, stored in a0, has now been zeroed.
-        debug_assert!(borrow == a0);
+    debug_assert_eq!(cmp_slice(a.data.as_slice(), b), Less);
 
-        q.data[j] = q0;
-
-        // Pop off the next top digit of a.
-        a0 = a.data.pop().unwrap();
-    }
-
-    a.data.push(a0);
-    a.normalize();
-
-    debug_assert_eq!(cmp_slice(&a.data, b), Less);
-
-    (q.normalized(), a)
+    (BigUint { data: q.into() }, a)
 }
 
 forward_val_ref_binop!(impl Div for BigUint, div);
